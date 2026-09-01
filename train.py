@@ -99,7 +99,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     if stage == "coarse" and opt.zerostamp_init:
         load_in_memory = True
         # batch_size = 4
-        temp_list = get_stamp_list(viewpoint_stack,0)
+        temp_list = get_stamp_list(viewpoint_stack,0) 
         viewpoint_stack = temp_list.copy()
     else:
         load_in_memory = False 

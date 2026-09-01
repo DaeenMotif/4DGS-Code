@@ -1,0 +1,35 @@
+name: 4DGS
+channels:
+  - pytorch
+  - conda-forge
+  - nodefaults
+dependencies:
+  # Keep the whole CUDA toolchain on one channel: conda-forge's nvcc resolves its
+  # headers under $CONDA_PREFIX/targets/x86_64-linux/include, the nvidia/defaults
+  # builds use $CONDA_PREFIX/include, and a mix of the two fails to find cuda_runtime.h.
+  - conda-forge::cuda-toolkit=12.4
+  - conda-forge::cuda-nvcc=12.4
+  # CUDA 12.4 refuses gcc > 13, and gcc >= 13 no longer includes <cstdint>
+  # transitively, which the rasterizer sources rely on.
+  - conda-forge::gcc=12
+  - conda-forge::gxx=12
+  - plyfile
+  - python=3.8
+  - pip=22.3.1
+  - pytorch
+  - torchaudio
+  - torchvision
+  - tqdm
+  - pytorch-cuda=12.4
+  - matplotlib
+  # - argparse
+  - lpips
+  # - pytorch_msssim  
+  # - open3d
+  # - imageio[ffmpeg]
+  # - mmcv==1.6.0
+  - pip:
+    - submodules/depth-diff-gaussian-rasterization
+    - submodules/simple-knn
+    - opencv-python
+    - joblib

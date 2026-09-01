@@ -164,14 +164,14 @@ class Load_hyper_data(Dataset):
         FovX = focal2fov(camera.focal_length, self.w)
         image_path = "/".join(self.all_img[idx].split("/")[:-1])
         image_name = self.all_img[idx].split("/")[-1]
-        if self.image_mask is not None and self.split == "test":
+        if self.image_mask is not None and self.split == "test": # none
             mask = Image.open(self.image_mask[idx])
             mask = PILtoTorch(mask,None)
             mask = mask.to(torch.float32)[0:1,:,:]
 
             mask = F.interpolate(mask.unsqueeze(0), size=[self.h, self.w], mode='bilinear', align_corners=False).squeeze(0)
         else:
-            mask = None
+            mask = None # mask is None
 
         
         caminfo = CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,

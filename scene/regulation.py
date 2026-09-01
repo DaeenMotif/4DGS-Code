@@ -22,7 +22,13 @@ def compute_plane_tv(t):
 def compute_plane_smoothness(t):
     batch_size, c, h, w = t.shape
     # Convolve with a second derivative filter, in the time dimension which is dimension 2
-    first_difference = t[..., 1:, :] - t[..., :h-1, :]  # [batch, c, h-1, w]
+    # (K-plane paper) penalize sharp “acceleration” over time. We only apply this regularizer on the time dimension of our space-time plane
+    # to encourage smooth motion and discourage acceleration
+    
+    # first_difference = velocity: how much each cell differs from the previous one along h
+    first_difference = t[..., 1:, :] - t[..., :h-1, :]  # [batch, c, h-1, w] 
+    
+    # second_difference = acc: how much that velocity itself changes
     second_difference = first_difference[..., 1:, :] - first_difference[..., :h-2, :]  # [batch, c, h-2, w]
     # Take the L2 norm of the result
     return torch.square(second_difference).mean()

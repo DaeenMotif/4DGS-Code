@@ -52,7 +52,7 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, "poses_bounds.npy")):
             scene_info = sceneLoadTypeCallbacks["dynerf"](args.source_path, args.white_background, args.eval)
             dataset_type="dynerf"
-        elif os.path.exists(os.path.join(args.source_path,"dataset.json")):
+        elif os.path.exists(os.path.join(args.source_path,"dataset.json")): # HyperNeRF / NeRFies Dataset
             scene_info = sceneLoadTypeCallbacks["nerfies"](args.source_path, False, args.eval)
             dataset_type="nerfies"
         elif os.path.exists(os.path.join(args.source_path,"train_meta.json")):
@@ -74,13 +74,13 @@ class Scene:
         self.video_camera = FourDGSdataset(scene_info.video_cameras, args, dataset_type)
 
         # self.video_camera = cameraList_from_camInfos(scene_info.video_cameras,-1,args)
-        xyz_max = scene_info.point_cloud.points.max(axis=0)
+        xyz_max = scene_info.point_cloud.points.max(axis=0) # computes the aabb bounds of initial SfM PCD; determines spatial extent of scene for the Hexplane
         xyz_min = scene_info.point_cloud.points.min(axis=0)
         if args.add_points:
             print("add points.")
             # breakpoint()
-            scene_info = scene_info._replace(point_cloud=add_points(scene_info.point_cloud, xyz_max=xyz_max, xyz_min=xyz_min))
-        self.gaussians._deformation.deformation_net.set_aabb(xyz_max,xyz_min)
+            scene_info = scene_info._replace(point_cloud=add_points(scene_info.point_cloud, xyz_max=xyz_max, xyz_min=xyz_min)) # generate 100K random points within aabb and append them to initial PCD
+        self.gaussians._deformation.deformation_net.set_aabb(xyz_max,xyz_min) # xyz_max array([11.6378231 ,  9.00338554, 21.73974991]); xyz_min = array([-16.96938133, -13.51254368,   7.10160971])
         if self.loaded_iter:
             self.gaussians.load_ply(os.path.join(self.model_path,
                                                            "point_cloud",
@@ -100,7 +100,7 @@ class Scene:
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        self.gaussians.save_deformation(point_cloud_path)
+        self.gaussians.save_deformation(point_cloud_path) # saves deformation network weights (HexPlane + MLP) alongside point cloud parameters
     def getTrainCameras(self, scale=1.0):
         return self.train_camera
 

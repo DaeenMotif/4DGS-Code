@@ -16,13 +16,14 @@ from scene.grid import DenseGrid
 class Deformation(nn.Module):
     def __init__(self, D=8, W=256, input_ch=27, input_ch_time=9, grid_pe=0, skips=[], args=None):
         super(Deformation, self).__init__()
-        self.D = D
-        self.W = W
+        self.D = D # Depth of MLP feature backbone (1)
+        self.W = W # Width (hidden dimension) of the MLP layers (128)
         self.input_ch = input_ch
         self.input_ch_time = input_ch_time
         self.skips = skips
-        self.grid_pe = grid_pe
+        self.grid_pe = grid_pe # 0 (no positional encoding used in paper)
         self.no_grid = args.no_grid
+        # HexPlaneField feature grid for factorized spatiotemporal features
         self.grid = HexPlaneField(args.bounds, args.kplanes_config, args.multires)
         # breakpoint()
         self.args = args
@@ -43,12 +44,16 @@ class Deformation(nn.Module):
         if self.args.empty_voxel:
             self.empty_voxel.set_aabb(xyz_max, xyz_min)
     def create_net(self):
+        """
+        - feature_out: Main backbone MLP taking grid features to hidden representation.
+        - shs_deform: predict per rgb channel's sh coeff in deformation,Outp hence out dim 16*3 = 48 {but not used}
+        """
         mlp_out_dim = 0
         if self.grid_pe !=0:
             
             grid_out_dim = self.grid.feat_dim+(self.grid.feat_dim)*2 
         else:
-            grid_out_dim = self.grid.feat_dim
+            grid_out_dim = self.grid.feat_dim # 48 ; output_coordinate_dim: 16 and multires = [1,2,4] → 16 × 3 = 48
         if self.no_grid:
             self.feature_out = [nn.Linear(4,self.W)]
         else:
@@ -57,7 +62,8 @@ class Deformation(nn.Module):
         for i in range(self.D-1):
             self.feature_out.append(nn.ReLU())
             self.feature_out.append(nn.Linear(self.W,self.W))
-        self.feature_out = nn.Sequential(*self.feature_out)
+        self.feature_out = nn.Sequential(*self.feature_out) # Sequential(  (0): Linear(in_features=48, out_features=128, bias=True))
+        # hidden feature dim W -> each attribute dimension
         self.pos_deform = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 3))
         self.scales_deform = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 3))
         self.rotations_deform = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 4))
@@ -66,7 +72,8 @@ class Deformation(nn.Module):
 
     def query_time(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb):
 
-        if self.no_grid:
+        if self.no_grid:  # cancel the spatial-temporal hexplane
+            # Bypass hexplane, pc.get_xyz == rays_pts_emb
             h = torch.cat([rays_pts_emb[:,:3],time_emb[:,:1]],-1)
         else:
 
@@ -76,7 +83,7 @@ class Deformation(nn.Module):
                 grid_feature = poc_fre(grid_feature,self.grid_pe)
             hidden = torch.cat([grid_feature],-1) 
         
-        
+        # Pass concatenated features through MLP
         hidden = self.feature_out(hidden)   
  
 
@@ -94,8 +101,11 @@ class Deformation(nn.Module):
         grid_feature = self.grid(rays_pts_emb[:,:3])
         dx = self.static_mlp(grid_feature)
         return rays_pts_emb[:, :3] + dx
-    def forward_dynamic(self,rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb):
+    def forward_dynamic(self,rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb): # rays_pts_emb is 3D gaussian mean
+        # Get hidden features from spatiotemporal hexplane
         hidden = self.query_time(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb)
+        
+        # Compute modulation mask to blend canonical and dynamic properties
         if self.args.static_mlp:
             mask = self.static_mlp(hidden)
         elif self.args.empty_voxel:
@@ -103,44 +113,48 @@ class Deformation(nn.Module):
         else:
             mask = torch.ones_like(opacity_emb[:,0]).unsqueeze(-1)
         # breakpoint()
+        
+        # Position displacement
         if self.args.no_dx:
             pts = rays_pts_emb[:,:3]
         else:
             dx = self.pos_deform(hidden)
             pts = torch.zeros_like(rays_pts_emb[:,:3])
             pts = rays_pts_emb[:,:3]*mask + dx
-        if self.args.no_ds :
             
+        # Scale deformation
+        if self.args.no_ds :
             scales = scales_emb[:,:3]
         else:
             ds = self.scales_deform(hidden)
-
             scales = torch.zeros_like(scales_emb[:,:3])
             scales = scales_emb[:,:3]*mask + ds
             
+        # Rotation deformation
         if self.args.no_dr :
             rotations = rotations_emb[:,:4]
         else:
             dr = self.rotations_deform(hidden)
-
             rotations = torch.zeros_like(rotations_emb[:,:4])
+            # Apply rotation flag controls quaternion multiply vs additive
             if self.args.apply_rotation:
                 rotations = batch_quaternion_multiply(rotations_emb, dr)
             else:
                 rotations = rotations_emb[:,:4] + dr
 
+        # Opacity deformation
         if self.args.no_do :
             opacity = opacity_emb[:,:1] 
         else:
             do = self.opacity_deform(hidden) 
-          
             opacity = torch.zeros_like(opacity_emb[:,:1])
             opacity = opacity_emb[:,:1]*mask + do
+            
+        # SH Color deformation
         if self.args.no_dshs:
             shs = shs_emb
         else:
             dshs = self.shs_deform(hidden).reshape([shs_emb.shape[0],16,3])
-
             shs = torch.zeros_like(shs_emb)
             # breakpoint()
             shs = shs_emb*mask.unsqueeze(-1) + dshs
@@ -161,13 +175,13 @@ class Deformation(nn.Module):
 class deform_network(nn.Module):
     def __init__(self, args) :
         super(deform_network, self).__init__()
-        net_width = args.net_width
+        net_width = args.net_width # 128
         timebase_pe = args.timebase_pe
-        defor_depth= args.defor_depth
+        defor_depth= args.defor_depth  # 1
         posbase_pe= args.posebase_pe
         scale_rotation_pe = args.scale_rotation_pe
         opacity_pe = args.opacity_pe
-        timenet_width = args.timenet_width
+        timenet_width = args.timenet_width # 64
         timenet_output = args.timenet_output
         grid_pe = args.grid_pe
         times_ch = 2*timebase_pe+1

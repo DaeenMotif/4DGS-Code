@@ -16,16 +16,20 @@ def get_normalized_directions(directions):
     return (directions + 1.0) / 2.0
 
 
-def normalize_aabb(pts, aabb):
-    return (pts - aabb[0]) * (2.0 / (aabb[1] - aabb[0])) - 1.0
+def normalize_aabb(pts, aabb): # map world coords to [-1,1] range
+    #  formula: (pts - aabb[0]) * (2 / (aabb[1] - aabb[0])) - 1
+    # (pts - max) * (2 / (min - max)) - 1, i.e. it sends max -> -1 and min -> +1, just axis-flipped 
+    return (pts - aabb[0]) * (2.0 / (aabb[1] - aabb[0])) - 1.0 
 def grid_sample_wrapper(grid: torch.Tensor, coords: torch.Tensor, align_corners: bool = True) -> torch.Tensor:
-    grid_dim = coords.shape[-1]
+    # retrieve the feature values inside each plane using bilinear interpolation, for ONE plane
+    # grid [1, feature_dim, reso_h, reso_w], coords [N, 2] in [-1,1] -> out [N, feature_dim]
+    grid_dim = coords.shape[-1] # 2 for the hexplane's 2D planes
 
     if grid.dim() == grid_dim + 1:
         # no batch dimension present, need to add it
         grid = grid.unsqueeze(0)
     if coords.dim() == 2:
-        coords = coords.unsqueeze(0)
+        coords = coords.unsqueeze(0) # [N, 2] -> [1, N, 2]
 
     if grid_dim == 2 or grid_dim == 3:
         grid_sampler = F.grid_sample
@@ -39,10 +43,10 @@ def grid_sample_wrapper(grid: torch.Tensor, coords: torch.Tensor, align_corners:
     interp = grid_sampler(
         grid,  # [B, feature_dim, reso, ...]
         coords,  # [B, 1, ..., n, grid_dim]
-        align_corners=align_corners,
-        mode='bilinear', padding_mode='border')
+        align_corners=align_corners, # # -1/+1 land on the first/last cell CENTERS
+        mode='bilinear', padding_mode='border') # 'border': out-of-range coords clamp to the edge value
     interp = interp.view(B, feature_dim, n).transpose(-1, -2)  # [B, n, feature_dim]
-    interp = interp.squeeze()  # [B?, n, feature_dim?]
+    interp = interp.squeeze()  # [n, feature_dim?]
     return interp
 
 def init_grid_param(
@@ -56,20 +60,20 @@ def init_grid_param(
     has_time_planes = in_dim == 4
     assert grid_nd <= in_dim
     coo_combs = list(itertools.combinations(range(in_dim), grid_nd))
-    grid_coefs = nn.ParameterList()
+    grid_coefs = nn.ParameterList() # ParameterList(  (0): Parameter containing: [torch.float32 of size 1x16x64x64])
     for ci, coo_comb in enumerate(coo_combs):
         new_grid_coef = nn.Parameter(torch.empty(
             [1, out_dim] + [reso[cc] for cc in coo_comb[::-1]]
         ))
-        if has_time_planes and 3 in coo_comb:  # Initialize time planes to 1
+        if has_time_planes and 3 in coo_comb:  # Initialize time planes to 1 so if only static, the hamadard product only accounts for spatial components (xy,xz,yz) only
             nn.init.ones_(new_grid_coef)
         else:
-            nn.init.uniform_(new_grid_coef, a=a, b=b)
+            nn.init.uniform_(new_grid_coef, a=a, b=b) # spatial planes parameters: uniform [0.1, 0.5]
         grid_coefs.append(new_grid_coef)
 
     return grid_coefs
 
-
+# Interpolate multiscale features
 def interpolate_ms_features(pts: torch.Tensor,
                             ms_grids: Collection[Iterable[nn.Module]],
                             grid_dimensions: int,
@@ -90,19 +94,20 @@ def interpolate_ms_features(pts: torch.Tensor,
             feature_dim = grid[ci].shape[1]  # shape of grid[ci]: 1, out_dim, *reso
             interp_out_plane = (
                 grid_sample_wrapper(grid[ci], pts[..., coo_comb])
-                .view(-1, feature_dim)
+                .view(-1, feature_dim) # [N, feature_dim]
             )
             # compute product over planes
-            interp_space = interp_space * interp_out_plane
+            interp_space = interp_space * interp_out_plane # Hadamard product: elementwise multiplication
+            # combining the planes by multiplication allows k-planes to produce spatially localized signals, which is not possible with addition (K-planes paper S3.1)
 
         # combine over scales
         if concat_features:
-            multi_scale_interp.append(interp_space)
+            multi_scale_interp.append(interp_space) # collect multiple scales features,  then
         else:
             multi_scale_interp = multi_scale_interp + interp_space
 
     if concat_features:
-        multi_scale_interp = torch.cat(multi_scale_interp, dim=-1)
+        multi_scale_interp = torch.cat(multi_scale_interp, dim=-1) # concat them : -> [N, num_levels * feature_dim]
     return multi_scale_interp
 
 
@@ -110,9 +115,9 @@ class HexPlaneField(nn.Module):
     def __init__(
         self,
         
-        bounds,
-        planeconfig,
-        multires
+        bounds, # bounds = 1.6
+        planeconfig, # {'grid_dimensions': 2, 'input_coordinate_dim': 4, 'output_coordinate_dim': 16, 'resolution': [64, 64, 64, 100]}
+        multires # multires = [1,2,4]
     ) -> None:
         super().__init__()
         aabb = torch.tensor([[bounds,bounds,bounds],
@@ -125,7 +130,7 @@ class HexPlaneField(nn.Module):
         # 1. Init planes
         self.grids = nn.ModuleList()
         self.feat_dim = 0
-        for res in self.multiscale_res_multipliers:
+        for res in self.multiscale_res_multipliers: # [1,2,4]
             # initialize coordinate grid
             config = self.grid_config[0].copy()
             # Resolution fix: multi-res only on spatial planes

@@ -33,7 +33,7 @@ class FourDGSdataset(Dataset):
                 T = caminfo.T
                 FovX = caminfo.FovX
                 FovY = caminfo.FovY
-                time = caminfo.time
+                time = caminfo.time # now time is a camera parameter referring to timestep that shot was taken
     
                 mask = caminfo.mask
             return Camera(colmap_id=index,R=R,T=T,FoVx=FovX,FoVy=FovY,image=image,gt_alpha_mask=None,

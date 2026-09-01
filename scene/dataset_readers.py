@@ -33,7 +33,7 @@ from tqdm import tqdm
 class CameraInfo(NamedTuple):
     uid: int
     R: np.array
-    T: np.array
+    T: np.array 
     FovY: np.array
     FovX: np.array
     image: np.array
@@ -41,10 +41,10 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
-    time : float
+    time : float # time for camera timestamp
     mask: np.array
    
-class SceneInfo(NamedTuple):
+class SceneInfo(NamedTuple): # video_cameras for dynamic rendering and maxtime for temporal normalization
     point_cloud: BasicPointCloud
     train_cameras: list
     test_cameras: list
@@ -370,11 +370,11 @@ def format_infos(dataset,split):
     return cameras
 
 
-def readHyperDataInfos(datadir,use_bg_points,eval):
-    train_cam_infos = Load_hyper_data(datadir,0.5,use_bg_points,split ="train")
+def readHyperDataInfos(datadir,use_bg_points,eval): # Calls 'Load_hyper_data' class for train/test splits
+    train_cam_infos = Load_hyper_data(datadir,0.5,use_bg_points,split ="train") # 0.5 is ratio: 0.5 means half-resolution
     test_cam_infos = Load_hyper_data(datadir,0.5,use_bg_points,split="test")
     print("load finished")
-    train_cam = format_hyper_data(train_cam_infos,"train")
+    train_cam = format_hyper_data(train_cam_infos,"train") # format the data into a CameraInfo list
     print("format finished")
     max_time = train_cam_infos.max_time
     video_cam_infos = copy.deepcopy(test_cam_infos)
@@ -397,7 +397,7 @@ def readHyperDataInfos(datadir,use_bg_points,eval):
                            maxtime=max_time
                            )
 
-    return scene_info
+    return scene_info # returns a populated SceneInfo object containing all dynamic components
 def format_render_poses(poses,data_infos):
     cameras = []
     tensor_to_pil = transforms.ToPILImage()
@@ -423,11 +423,11 @@ def format_render_poses(poses,data_infos):
                             time = time, mask=None))
     return cameras
 
-def add_points(pointsclouds, xyz_min, xyz_max):
-    add_points = (np.random.random((100000, 3)))* (xyz_max-xyz_min) + xyz_min
+def add_points(pointsclouds, xyz_min, xyz_max): # augment a sparse point cloud by generating 100k random points
+    add_points = (np.random.random((100000, 3)))* (xyz_max-xyz_min) + xyz_min # within the scene AABB [xyz_min, xyz_max]
     add_points = add_points.astype(np.float32)
-    addcolors = np.random.random((100000, 3)).astype(np.float32)
-    addnormals = np.random.random((100000, 3)).astype(np.float32)
+    addcolors = np.random.random((100000, 3)).astype(np.float32) # random colors and normals assigned
+    addnormals = np.random.random((100000, 3)).astype(np.float32) # random colors and normals assigned
     # breakpoint()
     new_points = np.vstack([pointsclouds.points,add_points])
     new_colors = np.vstack([pointsclouds.colors,addcolors])

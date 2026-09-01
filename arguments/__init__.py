@@ -55,7 +55,7 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = True
         self.render_process=False
-        self.add_points=False
+        self.add_points=False # if true, add 100k random points to initial point cloud, to cover for sparsity
         self.extension=".png"
         self.llffhold=8
         super().__init__(parser, "Loading Parameters", sentinel)
@@ -71,7 +71,7 @@ class PipelineParams(ParamGroup):
         self.compute_cov3D_python = False
         self.debug = False
         super().__init__(parser, "Pipeline Parameters")
-class ModelHiddenParams(ParamGroup):
+class ModelHiddenParams(ParamGroup): # Configuration class for the deformation network and hexplane
     def __init__(self, parser):
         self.net_width = 64 # width of deformation MLP, larger will increase the rendering quality and decrase the training/rendering speed.
         self.timebase_pe = 4 # useless
@@ -81,17 +81,17 @@ class ModelHiddenParams(ParamGroup):
         self.opacity_pe = 2 # useless
         self.timenet_width = 64 # useless
         self.timenet_output = 32 # useless
-        self.bounds = 1.6 
-        self.plane_tv_weight = 0.0001 # TV loss of spatial grid
-        self.time_smoothness_weight = 0.01 # TV loss of temporal grid
-        self.l1_time_planes = 0.0001  # TV loss of temporal grid
+        self.bounds = 1.6 # initial AABB (axis-aligned bbox of scene) for the hexplane grid. Creates a cube [-1.6, 1.6]_3. Overwritten by actual scene bounds from set_aabb()
+        self.plane_tv_weight = 0.0001 # TV loss weight of of spatial grid
+        self.time_smoothness_weight = 0.01 # TV loss weight of of spatiotemporal grid
+        self.l1_time_planes = 0.0001  # weight for the L1 penalty pushing spatiotemporal planes toward 1.0
         self.kplanes_config = {
                              'grid_dimensions': 2,
                              'input_coordinate_dim': 4,
                              'output_coordinate_dim': 32,
                              'resolution': [64, 64, 64, 25]  # [64,64,64]: resolution of spatial grid. 25: resolution of temporal grid, better to be half length of dynamic frames
                             }
-        self.multires = [1, 2, 4, 8] # multi resolution of voxel grid
+        self.multires = [1, 2, 4, 8] # multi resolution of voxel grid; [64,128,256,512], different levels of geometric details captured: coarse to fine
         self.no_dx=False # cancel the deformation of Gaussians' position
         self.no_grid=False # cancel the spatial-temporal hexplane.
         self.no_ds=False # cancel the deformation of Gaussians' scaling
@@ -109,18 +109,21 @@ class ModelHiddenParams(ParamGroup):
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.dataloader=False
-        self.zerostamp_init=False
-        self.custom_sampler=None
+        self.zerostamp_init=False # when True in coarse stage, initializes training using only frames at time=0 (neu3D)
+        self.custom_sampler=None # custom data sampling strategy: FineSampler
         self.iterations = 30_000
-        self.coarse_iterations = 3000
+        self.coarse_iterations = 3000 # warm-up optimization of 3DGS which makes some 3D Gaussians stay in dynamic parts.
+        # Helps deformation learning and keep training stable by eliminating cases of large deformation.
+        
+        # both position and deformation use exponentially decayed LR
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = 20_000
-        self.deformation_lr_init = 0.00016
-        self.deformation_lr_final = 0.000016
-        self.deformation_lr_delay_mult = 0.01
-        self.grid_lr_init = 0.0016
+        self.deformation_lr_init = 0.00016 # similar to position_lr_init
+        self.deformation_lr_final = 0.000016 # similar to position_lr_final
+        self.deformation_lr_delay_mult = 0.01 # same decay strategy as position_lr
+        self.grid_lr_init = 0.0016 # 10x higher than position_lr so that grid features can be learned faster
         self.grid_lr_final = 0.00016
 
         self.feature_lr = 0.0025
@@ -130,9 +133,14 @@ class OptimizationParams(ParamGroup):
         self.percent_dense = 0.01
         self.lambda_dssim = 0
         self.lambda_lpips = 0
+        
+        # ---UNUSED---
         self.weight_constraint_init= 1
         self.weight_constraint_after = 0.2
         self.weight_decay_iteration = 5000
+        # ---UNUSED---
+        
+        
         self.opacity_reset_interval = 3000
         self.densification_interval = 100
         self.densify_from_iter = 500

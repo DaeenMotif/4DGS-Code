@@ -20,7 +20,7 @@ def rotmat2qvec(R):
         qvec *= -1
     return qvec
 
-root_dir = sys.argv[1]
+root_dir = sys.argv[1] # the workdir
 colmap_dir = os.path.join(root_dir,"sparse_")
 if not os.path.exists(colmap_dir):
     os.makedirs(colmap_dir)
@@ -58,10 +58,12 @@ for cam, image in zip(cams, images):
     T = -np.array(cam['position'])@R 
     
     T = [str(i) for i in T]
-    qevc = [str(i) for i in rotmat2qvec(R.T)]
-    print(idx+1," ".join(qevc)," ".join(T),1,image,"\n",file=object_images_file)
+    qevc = [str(i) for i in rotmat2qvec(R.T)] # store as quaternion
+    # COLMAP ids are 1-based, and each image gets its own camera because the
+    # vrig rigs have per-view intrinsics.
+    print(idx+1," ".join(qevc)," ".join(T),idx+1,image,"\n",file=object_images_file)
 
-    print(idx,"SIMPLE_PINHOLE",image_size[0]/2,image_size[1]/2,cam['focal_length']/2,cam['principal_point'][0]/2,cam['principal_point'][1]/2,file=object_cameras_file)
+    print(idx+1,"SIMPLE_PINHOLE",int(image_size[0]//2),int(image_size[1]//2),cam['focal_length']/2,cam['principal_point'][0]/2,cam['principal_point'][1]/2,file=object_cameras_file)
     idx+=1
     shutil.copy(os.path.join(image_dir,image),os.path.join(imagecolmap_dir,image))
 print(idx)

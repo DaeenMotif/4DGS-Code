@@ -118,12 +118,12 @@ class Camera:
     self.orientation = np.array(orientation, dtype)
     self.position = np.array(position, dtype)
     self.focal_length = np.array(focal_length, dtype)
-    self.principal_point = np.array(principal_point, dtype)
-    self.skew = np.array(skew, dtype)
-    self.pixel_aspect_ratio = np.array(pixel_aspect_ratio, dtype)
-    self.radial_distortion = np.array(radial_distortion, dtype)
-    self.tangential_distortion = np.array(tangential_distortion, dtype)
-    self.image_size = np.array(image_size, np.uint32)
+    self.principal_point = np.array(principal_point, dtype) # array([536., 960.])
+    self.skew = np.array(skew, dtype) # 0.0
+    self.pixel_aspect_ratio = np.array(pixel_aspect_ratio, dtype) # 0.9982916712760925
+    self.radial_distortion = np.array(radial_distortion, dtype) # array([ 0.07964308, -0.15445076,  0.        ])
+    self.tangential_distortion = np.array(tangential_distortion, dtype) # array([ 0.00096258, -0.00129861])
+    self.image_size = np.array(image_size, np.uint32) #array([1072, 1920])
     self.dtype = dtype
 
   @classmethod

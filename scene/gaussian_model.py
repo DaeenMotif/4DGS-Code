@@ -25,8 +25,14 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.deformation import deform_network
 from scene.regulation import compute_plane_smoothness
 class GaussianModel:
-
-    def setup_functions(self):
+    """
+    Extends 3DGS with deformation field
+    While original 3DGS stores static (xyz, opacity, scale, rotation, sh), 
+    4DGS model adds a shared deformation field that predicts temporal changes to these properties (specifically xyz, scale, rotation)
+    spherical harmonics (color) and opacity are not used in deform-network
+    to prevent irrational shape changes during rendering and ruining of surface texture during movement
+    """
+    def setup_functions(self): # same as 3DGS
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
             L = build_scaling_rotation(scaling_modifier * scaling, rotation)
             actual_covariance = L @ L.transpose(1, 2)
@@ -48,7 +54,7 @@ class GaussianModel:
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
         self._xyz = torch.empty(0)
-        self._deformation = deform_network(args)
+        self._deformation = deform_network(args)  # shared deformation neural network predicting temporal deltas
         self._features_dc = torch.empty(0)
         self._features_rest = torch.empty(0)
         self._scaling = torch.empty(0)
@@ -60,15 +66,15 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
-        self._deformation_table = torch.empty(0)
+        self._deformation_table = torch.empty(0)  # Boolean mask [N_points] indicating if a Gaussian participates in deformation pipeline
         self.setup_functions()
 
     def capture(self):
         return (
             self.active_sh_degree,
             self._xyz,
-            self._deformation.state_dict(),
-            self._deformation_table,
+            self._deformation.state_dict(),# deformation network state dict to checkpoint
+            self._deformation_table, # deformation table to checkpoint
             # self.grid,
             self._features_dc,
             self._features_rest,
@@ -161,7 +167,8 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
-        self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0)
+        self._deformation_table = torch.gt(torch.ones((self.get_xyz.shape[0]),device="cuda"),0) # 1-D boolean mask of shape [N_points] all True
+        # All points start as deformable initially: assume everything is deformable at beginning
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -442,7 +449,7 @@ class GaussianModel:
 
     def densify_and_clone(self, grads, grad_threshold, scene_extent, density_threshold=20, displacement_scale=20, model_path=None, iteration=None, stage=None):
         grads_accum_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
-        
+        # density_threhold = 5 displacement_scale = 5
 
         selected_pts_mask = torch.logical_and(grads_accum_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
@@ -452,7 +459,7 @@ class GaussianModel:
         new_opacities = self._opacity[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
-        new_deformation_table = self._deformation_table[selected_pts_mask]
+        new_deformation_table = self._deformation_table[selected_pts_mask] # tensor([True, True, True], device='cuda:0')
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table)
 
     @property
@@ -521,10 +528,13 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor[update_filter,:2], dim=-1, keepdim=True)
         self.denom[update_filter] += 1
+    
     @torch.no_grad()
     def update_deformation_table(self,threshold):
         # print("origin deformation point nums:",self._deformation_table.sum())
+        # since deformation lives outside of cuda,we take max deformation across xyz dimension
         self._deformation_table = torch.gt(self._deformation_accum.max(dim=-1).values/100,threshold)
+    
     def print_deformation_weight_grad(self):
         for name, weight in self._deformation.named_parameters():
             if weight.requires_grad:
@@ -535,7 +545,7 @@ class GaussianModel:
                     if weight.grad.mean() != 0:
                         print(name," :",weight.grad.mean(), weight.grad.min(), weight.grad.max())
         print("-"*50)
-    def _plane_regulation(self):
+    def _plane_regulation(self): # TV smoothness for spatial planes [0,1,3] (0:xy, 1:xz, 2:xt, 3:yz, 4:yt, 5:zt)
         multi_res_grids = self._deformation.deformation_net.grid.grids
         total = 0
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
@@ -545,9 +555,9 @@ class GaussianModel:
             else:
                 time_grids =  [0,1,3]
             for grid_id in time_grids:
-                total += compute_plane_smoothness(grids[grid_id])
+                total += compute_plane_smoothness(grids[grid_id]) # compute_plane_smoothness from scene/regulation.py
         return total
-    def _time_regulation(self):
+    def _time_regulation(self): # TV smoothness for spatiotemporal planes [2,4,5] (0:xy, 1:xz, 2:xt, 3:yz, 4:yt, 5:zt)
         multi_res_grids = self._deformation.deformation_net.grid.grids
         total = 0
         # model.grids is 6 x [1, rank * F_dim, reso, reso]
@@ -557,9 +567,12 @@ class GaussianModel:
             else:
                 time_grids =[2, 4, 5]
             for grid_id in time_grids:
-                total += compute_plane_smoothness(grids[grid_id])
+                total += compute_plane_smoothness(grids[grid_id]) # compute_plane_smoothness from scene/regulation.py
         return total
-    def _l1_regulation(self):
+    
+    # (From K-planes) static part of the scene to be modeled by the space-only planes
+    # We encourage this separation of space and time by initializing the features in the space-time planes (xt,yt,zt) as 1 
+    def _l1_regulation(self): # L1 penalty pushing spatiotemporal planes toward 1.0 if corresponding spatial content does not change over time
                 # model.grids is 6 x [1, rank * F_dim, reso, reso]
         multi_res_grids = self._deformation.deformation_net.grid.grids
 

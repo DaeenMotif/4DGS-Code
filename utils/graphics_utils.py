@@ -14,19 +14,19 @@ import math
 import numpy as np
 from typing import NamedTuple
 
-class BasicPointCloud(NamedTuple):
+class BasicPointCloud(NamedTuple): # same as 3DGS
     points : np.array
     colors : np.array
     normals : np.array
 
-def geom_transform_points(points, transf_matrix):
-    P, _ = points.shape
-    ones = torch.ones(P, 1, dtype=points.dtype, device=points.device)
-    points_hom = torch.cat([points, ones], dim=1)
-    points_out = torch.matmul(points_hom, transf_matrix.unsqueeze(0))
+def geom_transform_points(points, transf_matrix): # unused, same transformation of points exists in forward.cu
+    P, _ = points.shape # [N,3]
+    ones = torch.ones(P, 1, dtype=points.dtype, device=points.device) # [N,1]
+    points_hom = torch.cat([points, ones], dim=1) # convert to 3D Homogenous coords [N,4]
+    points_out = torch.matmul(points_hom, transf_matrix.unsqueeze(0)) # Transform from 3D world homogenous coordinates to 2D viewspace coordinates
 
-    denom = points_out[..., 3:] + 0.0000001
-    return (points_out[..., :3] / denom).squeeze(dim=0)
+    denom = points_out[..., 3:] + 0.0000001 # add a small +ve number for numerical stability (avoid 0-div error)
+    return (points_out[..., :3] / denom).squeeze(dim=0) # [X,Y,Z,W] -> [X/W,Y/W,Z/W,1]
 
 def getWorld2View(R, t):
     Rt = np.zeros((4, 4))
