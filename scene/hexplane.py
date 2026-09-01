@@ -43,7 +43,7 @@ def grid_sample_wrapper(grid: torch.Tensor, coords: torch.Tensor, align_corners:
     interp = grid_sampler(
         grid,  # [B, feature_dim, reso, ...]
         coords,  # [B, 1, ..., n, grid_dim]
-        align_corners=align_corners, # # -1/+1 land on the first/last cell CENTERS
+        align_corners=align_corners, # # -1 and 1 refer to the centers of the corner pixels (top-left and bottom-right)
         mode='bilinear', padding_mode='border') # 'border': out-of-range coords clamp to the edge value
     interp = interp.view(B, feature_dim, n).transpose(-1, -2)  # [B, n, feature_dim]
     interp = interp.squeeze()  # [n, feature_dim?]
