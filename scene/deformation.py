@@ -71,7 +71,8 @@ class Deformation(nn.Module):
         self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 16*3))
 
     def query_time(self, rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb):
-
+        # self.grid: HexplaneField containing nn.ParameterList [a PyTorch container used to hold a list of trainable neural network parameters]
+        # self.grid has 3 Parameterlist, one for each multi-scale. Each ParamterList contains the LEARNABLE neural voxel based feature-grids: one for each plane
         if self.no_grid:  # cancel the spatial-temporal hexplane
             # Bypass hexplane, pc.get_xyz == rays_pts_emb
             h = torch.cat([rays_pts_emb[:,:3],time_emb[:,:1]],-1)
@@ -84,7 +85,7 @@ class Deformation(nn.Module):
             hidden = torch.cat([grid_feature],-1) 
         
         # Pass concatenated features through MLP
-        hidden = self.feature_out(hidden)   
+        hidden = self.feature_out(hidden)   # Sequential((0): Linear(in_features=48, out_features=128, bias=True))
  
 
         return hidden
