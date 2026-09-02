@@ -1,6 +1,7 @@
 _base_="default.py"
 # Kplanes config
-# Kplanes factorizes a higher dimensional space, d, into collection of 2D (K-D) planes
+# Kplanes factorizes a higher dimensional space, d, into collection of 2D (K-D) voxel planes
+# Voxel: A learnable feature-grid
 # C(d,2): convert the 4D neural voxels representation to C(4,2) = 6 2D feature grids (spatial grids and spatio-temporal grids)
 ModelParams=dict(
     kplanes_config = {

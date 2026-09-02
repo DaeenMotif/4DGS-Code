@@ -30,7 +30,7 @@ class Deformation(nn.Module):
         # self.args.empty_voxel=True
         if self.args.empty_voxel:
             self.empty_voxel = DenseGrid(channels=1, world_size=[64,64,64])
-        if self.args.static_mlp:
+        if self.args.static_mlp: # converts a feature of shape [..., self.W] -> [..., 1] (adding a 1D tag)
             self.static_mlp = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 1))
         
         self.ratio=0
@@ -53,7 +53,7 @@ class Deformation(nn.Module):
             
             grid_out_dim = self.grid.feat_dim+(self.grid.feat_dim)*2 
         else:
-            grid_out_dim = self.grid.feat_dim # 48 ; output_coordinate_dim: 16 and multires = [1,2,4] -> 16 × 3 = 48
+            grid_out_dim = self.grid.feat_dim # 48 ; output_coordinate_dim: 16 and multires = [1,2,4] -> 16dim feat from res1, 16dim feat from res 2, res3 = 16x3 = 48
         if self.no_grid:
             self.feature_out = [nn.Linear(4,self.W)]
         else:
@@ -97,7 +97,7 @@ class Deformation(nn.Module):
         else:
             return self.forward_dynamic(rays_pts_emb, scales_emb, rotations_emb, opacity, shs_emb, time_feature, time_emb)
 
-    def forward_static(self, rays_pts_emb):
+    def forward_static(self, rays_pts_emb): # forward static only uses the 3D point without the embedded time dimension
         grid_feature = self.grid(rays_pts_emb[:,:3])
         dx = self.static_mlp(grid_feature)
         return rays_pts_emb[:, :3] + dx
@@ -107,7 +107,7 @@ class Deformation(nn.Module):
         
         # Compute modulation mask to blend canonical and dynamic properties
         if self.args.static_mlp:
-            mask = self.static_mlp(hidden)
+            mask = self.static_mlp(hidden) # way to blend the static scene with dynamic
         elif self.args.empty_voxel:
             mask = self.empty_voxel(rays_pts_emb[:,:3])
         else:
